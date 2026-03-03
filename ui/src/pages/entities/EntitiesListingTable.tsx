@@ -1,0 +1,85 @@
+import React from "react";
+import { EuiBasicTable } from "@elastic/eui";
+import EuiCustomLink from "../../components/EuiCustomLink";
+import DataClassificationBadge from "../../components/DataClassificationBadge";
+import useFeatureViewEdgesByEntity from "./useFeatureViewEdgesByEntity";
+import { useParams } from "react-router-dom";
+import { feast } from "../../protos";
+
+interface EntitiesListingTableProps {
+  entities: feast.core.IEntity[];
+}
+
+const EntitiesListingTable = ({ entities }: EntitiesListingTableProps) => {
+  const { isSuccess, data } = useFeatureViewEdgesByEntity();
+  const { projectName } = useParams();
+
+  const columns = [
+    {
+      name: "Name",
+      field: "spec.name",
+      sortable: true,
+      render: (name: string, item: feast.core.IEntity) => {
+        // For "All Projects" view, link to the specific project
+        const itemProject = item?.spec?.project || projectName;
+        return (
+          <EuiCustomLink to={`/p/${itemProject}/entity/${name}`}>
+            {name}
+          </EuiCustomLink>
+        );
+      },
+    },
+    {
+      name: "Type",
+      field: "spec.valueType",
+      sortable: true,
+      render: (valueType: feast.types.ValueType.Enum) => {
+        const name = feast.types.ValueType.Enum[valueType];
+        return name === "INVALID" ? "N/A" : name;
+      },
+    },
+    {
+      name: "Classification",
+      render: (item: feast.core.IEntity) => {
+        const tags = (item?.spec as any)?.tags as
+          | Record<string, string>
+          | undefined;
+        return <DataClassificationBadge tags={tags} />;
+      },
+    },
+    {
+      name: "# of FVs",
+      render: (item: feast.core.IEntity) => {
+        if (isSuccess && data) {
+          return data[item?.spec?.name!] ? data[item?.spec?.name!].length : "0";
+        } else {
+          return ".";
+        }
+      },
+    },
+  ];
+
+  // Add Project column when viewing all projects
+  if (projectName === "all") {
+    columns.splice(1, 0, {
+      name: "Project",
+      field: "spec.project",
+      sortable: true,
+      render: (project: string) => {
+        return <span>{project || "Unknown"}</span>;
+      },
+    });
+  }
+
+  const getRowProps = (item: feast.core.IEntity) => {
+    return {
+      "data-test-subj": `row-${item?.spec?.name}`,
+    };
+  };
+
+  return (
+    <EuiBasicTable columns={columns} items={entities} rowProps={getRowProps} />
+  );
+};
+
+export default EntitiesListingTable;

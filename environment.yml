@@ -1,0 +1,49 @@
+# Feast Feature Store — Conda Environment
+# Includes Python SDK (spark, redis, postgres) + Node.js toolchain for UI compilation
+#
+# Usage:
+#   conda env create -f environment.yml
+#   conda activate feast_prod
+#
+# Post-install (yarn classic is not on conda-forge, install via npm):
+#   npm install -g yarn@1.22.22
+#
+# Build UI:
+#   cd ui && yarn install && npm run build
+#   cp -r ui/build sdk/python/feast/ui/build/
+#
+# Or use the Makefile shortcut:
+#   make build-ui-local
+#
+# UI build fixes applied in ui/package.json:
+#   - TypeScript pinned to ~5.2.2 (5.7+ causes compilation errors)
+#   - @elastic/eui pinned to 95.12.0 (^95 resolves to 100+ where EuiProvider was removed)
+
+name: feast_prod
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # ── Python ──
+  - python=3.11
+  - pip
+
+  # ── Node.js toolchain (for UI compilation) ──
+  - nodejs=22
+  # Note: yarn classic (1.x) is not available on conda-forge.
+  # Install via: npm install -g yarn@1.22.22
+
+  # ── System libraries (optional, for PySpark on YARN) ──
+  # Uncomment if submitting Spark jobs to a YARN cluster:
+  # - openjdk=11
+
+  # ── Python packages via pip ──
+  - pip:
+      # Feast with required extras
+      - "feast[spark,redis,postgres]==0.60.0"
+
+      # Airflow (orchestration)
+      - "apache-airflow[postgres,celery]==2.10.*"
+      - apache-airflow-providers-apache-spark
