@@ -1,5 +1,7 @@
 <!--Do not modify this file. It is auto-generated from a template (infra/templates/README.md.jinja2)-->
 
+https://towardsdatascience.com/optimizing-data-transfer-in-distributed-ai-ml-training-workloads/?utm_campaign=16536427-TDS+Daily&utm_medium=email&utm_content=410866043&utm_source=hs_email
+
 <p align="center">
     <a href="https://feast.dev/">
       <img src="https://raw.githubusercontent.com/feast-dev/feast/master/docs/assets/feast_logo.png" width="550">
