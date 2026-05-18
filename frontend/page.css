@@ -1,0 +1,394 @@
+/* ============================================================================
+ * PRISM page chrome — page-wide CSS, loaded by ui.apply_page_chrome().
+ * The `__VARS__` placeholder is substituted at runtime with the active
+ * theme's CSS custom properties.
+ * ============================================================================ */
+
+:root,
+.stApp {
+  __VARS__
+  /* Pin Streamlit's own text-colour variables to our --fg so widget
+     labels stay readable in either theme regardless of what
+     .streamlit/config.toml's [theme] block is set to. */
+  --text-color:           var(--fg);
+  --primary-text-color:   var(--fg);
+  --secondary-text-color: var(--fg);
+}
+
+html,
+body,
+.stApp {
+  background: radial-gradient(
+    ellipse at 50% 85%,
+    var(--bg-stop-1) 0%,
+    var(--bg-stop-2) 65%,
+    var(--bg-stop-3) 100%
+  ) !important;
+  color: var(--fg) !important;
+  /* CSS doesn't interpolate radial-gradient images — listing `background`
+     here just made the change snap on a delay. Color does interpolate. */
+  transition: color 0.35s ease;
+}
+
+.block-container {
+  padding: 0 !important;
+  max-width: 100% !important;
+}
+
+/* Main-page content (below the hero banner) — aggressively strip every
+   source of default Streamlit padding/margin around the date picker
+   widgets so the fields sit flush with the banner edge. */
+section[data-testid="stMain"] [data-testid="stMainBlockContainer"] {
+  padding: 0.25rem 1rem 0 !important;
+}
+section[data-testid="stMain"] [data-testid="stHorizontalBlock"] {
+  gap: 0.5rem !important;
+  margin: 0 !important;
+}
+section[data-testid="stMain"] [data-testid="stVerticalBlock"] {
+  gap: 0.25rem !important;
+}
+section[data-testid="stMain"] [data-testid="stColumn"] {
+  padding: 0 !important;
+}
+section[data-testid="stMain"] [data-testid="stElementContainer"] {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+section[data-testid="stMain"] :is(
+  [data-testid="stDateInput"],
+  [data-testid="stSlider"]
+) {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+section[data-testid="stMain"] :is(
+  [data-testid="stDateInput"],
+  [data-testid="stSlider"]
+) > div {
+  margin: 0 !important;
+  padding: 0 !important;
+  gap: 0 !important;
+}
+section[data-testid="stMain"] :is(
+  [data-testid="stDateInput"],
+  [data-testid="stSlider"]
+) label {
+  padding: 0 0 0.1rem 0 !important;
+  margin: 0 !important;
+  font-size: 0.85rem !important;
+  line-height: 1.1 !important;
+  /* Force the label to span the full widget width so text-align: center
+     actually centres it above the field. */
+  width: 100% !important;
+  display: block !important;
+  text-align: center !important;
+}
+
+/* Force readable label colour on every main-page widget. Maximum
+   specificity (html body … testid) + !important + opacity:1 + repeats
+   across `label`, `[data-testid="stWidgetLabel"]`, and BaseWeb form
+   labels — covers whatever variant the running Streamlit version
+   emits so the override always lands. */
+html body [data-testid="stWidgetLabel"],
+html body [data-testid="stWidgetLabel"] *,
+html body [data-testid="stWidgetLabel"] p,
+html body label[data-baseweb="form-control-label"],
+html body label[data-baseweb="form-control-label"] *,
+html body [data-testid="stDateInput"] label,
+html body [data-testid="stDateInput"] label *,
+html body [data-testid="stSlider"]    label,
+html body [data-testid="stSlider"]    label * {
+  color: var(--fg) !important;
+  opacity: 1 !important;
+  -webkit-text-fill-color: var(--fg) !important;
+}
+section[data-testid="stMain"] :is(
+  [data-testid="stDateInput"],
+  [data-testid="stSlider"]
+) label > div {
+  width: 100% !important;
+  justify-content: center !important;
+  text-align: center !important;
+}
+section[data-testid="stMain"] :is(
+  [data-testid="stDateInput"],
+  [data-testid="stSlider"]
+) label p {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.1 !important;
+  text-align: center !important;
+}
+/* Center the slider track + thumb within its column (was left-aligned). */
+section[data-testid="stMain"] [data-testid="stSlider"] > div > div {
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+/* Vertical separator line between the date pickers and the slider. Sits
+   inside a thin Streamlit column on the same row, height-matched to the
+   input controls beside it. Uses --fg with controlled opacity so it
+   reads in both themes (--toggle-border was too pale on light mode). */
+section[data-testid="stMain"] .prism-vsep {
+  width: 1px;
+  height: 56px;               /* covers label + input field together  */
+  margin: 18px auto 0;        /* drops it to align with the inputs    */
+  background: var(--fg);
+  opacity: 0.45;
+}
+
+header,
+footer,
+[data-testid="stToolbar"] {
+  display: none !important;
+}
+
+iframe {
+  border: 0 !important;
+  display: block;
+  background: transparent !important;
+}
+
+/* ---------------------------------------------------------------------------
+ * Sidebar — themed background, responsive width, always-visible.
+ * --------------------------------------------------------------------------- */
+
+[data-testid="stSidebar"] {
+  background: var(--bg-stop-2) !important;
+  border-right: 1px solid var(--toggle-border) !important;
+  transition: background 0.35s ease, border-color 0.25s ease;
+  /* Force visible regardless of viewport-width auto-collapse. */
+  transform: none !important;
+  margin-left: 0 !important;
+  visibility: visible !important;
+  /* Fluid width: shrinks on narrow viewports, caps at 280 px on wide ones. */
+  width: clamp(200px, 18vw, 280px) !important;
+  min-width: clamp(200px, 18vw, 280px) !important;
+  color: var(--fg);
+}
+
+[data-testid="stSidebar"] :is(h1, h2, h3, h4, h5, h6, p, label, span) {
+  color: var(--fg) !important;
+}
+
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapsedControl"] {
+  display: none !important;
+}
+
+/* Pin ONLY the theme toggle block to the bottom of the sidebar. The block
+   is wrapped in `st.container(key="prism_theme_block")` which Streamlit
+   renders with the class `st-key-prism_theme_block` — scoping the pin to
+   that class lets the user add other sidebar widgets that flow normally
+   from the top of the sidebar without being orphaned.
+
+   The block spans the sidebar full-width and flex-centers the toggle so
+   the sun/moon button sits in the horizontal middle, not against the
+   left edge. */
+section[data-testid="stSidebar"] { position: relative; }
+section[data-testid="stSidebar"] .st-key-prism_theme_block {
+  position: absolute;
+  bottom: 1.25rem;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Line spacer (st.divider) between the sidebar glass panels — pinned
+   to our --toggle-border so it reads in both themes without dominating.
+   Surrounding Streamlit wrappers also get their margins/padding stripped
+   so the divider hugs the panels above and below it. */
+section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(> [data-testid="stDivider"]),
+section[data-testid="stSidebar"] [data-testid="stDivider"] {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stDivider"] hr,
+section[data-testid="stSidebar"] hr {
+  border: 0 !important;
+  border-top: 1px solid var(--toggle-border) !important;
+  margin: 0.1rem 0.5rem !important;
+  padding: 0 !important;
+  opacity: 0.9 !important;
+}
+
+/* Frosted-glass panels around the sidebar sections. Both blocks share
+   one rule so they have identical padding, radius, shadow, and margin —
+   producing even, predictable whitespace around each panel. Uses the
+   same `--glass-*` tokens as the banner's title card so the styling
+   tracks light/dark automatically. */
+section[data-testid="stSidebar"] .st-key-prism_description_block,
+section[data-testid="stSidebar"] .st-key-prism_fees_block {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  margin: 0.75rem 0.25rem;     /* equal vertical + small horizontal inset */
+  box-shadow: 0 4px 16px var(--glass-shadow);
+  backdrop-filter: blur(8px) saturate(125%);
+  -webkit-backdrop-filter: blur(8px) saturate(125%);
+}
+/* The description's markdown <p> has a default top margin that adds an
+   extra unwanted gap inside the panel — collapse the TOP, but keep a
+   visible blank-line gap after the last sentence so the description has
+   breathing room before the panel's bottom border. */
+section[data-testid="stSidebar"] .st-key-prism_description_block
+  [data-testid="stMarkdownContainer"] p:first-child {
+  margin-top: 0 !important;
+}
+section[data-testid="stSidebar"] .st-key-prism_description_block
+  [data-testid="stMarkdownContainer"] p:last-child {
+  margin-bottom: 1rem !important;   /* ~1 blank line below "at a glance." */
+}
+
+/* Reserve room at the bottom of the in-flow sidebar content so user
+   widgets above don't visually overlap the absolutely-positioned
+   theme-toggle block (~48px button + 1.25rem bottom inset). Also strip
+   every source of default top-spacing so the first widget sits right at
+   the top of the sidebar:
+     - the sidebar header (close-arrow row) is fully hidden,
+     - the user-content container's top padding is removed,
+     - the first child's top margin is zeroed (markdown <p> defaults),
+     - paragraph/heading top-margins inside the first stMarkdown reset. */
+section[data-testid="stSidebar"] [data-testid="stSidebarHeader"] {
+  display: none !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+  padding-top: 0 !important;
+  padding-bottom: 96px !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > *:first-child,
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > *:first-child > *:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"]
+  [data-testid="stMarkdown"]:first-child p:first-child,
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"]
+  [data-testid="stCaptionContainer"]:first-child {
+  margin-top: 0 !important;
+}
+
+/* ---------------------------------------------------------------------------
+ * Theme toggle — single icon-only button (sun ↔ moon).
+ * --------------------------------------------------------------------------- */
+
+[data-testid="stSidebar"] [data-testid="stButton"] button {
+  background: transparent !important;
+  border: 1px solid var(--toggle-border) !important;
+  box-shadow: none !important;
+  color: var(--toggle-fg) !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+  border-radius: 12px !important;
+  width: 48px !important;
+  height: 48px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 22px !important;     /* sun/moon Unicode glyph rendering size */
+  line-height: 1 !important;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+[data-testid="stSidebar"] [data-testid="stButton"] button:hover {
+  background: var(--toggle-active-bg) !important;
+}
+
+/* The button's content sits in a markdown container/<p> wrapper; ensure it
+   inherits the button's font size so the glyph isn't shrunk by stricter
+   ancestor styles. */
+[data-testid="stSidebar"] [data-testid="stButton"] button p,
+[data-testid="stSidebar"] [data-testid="stButton"] button [data-testid="stMarkdownContainer"] {
+  font-size: inherit !important;
+  line-height: 1 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: var(--toggle-fg) !important;
+}
+
+/* ---------------------------------------------------------------------------
+ * Responsive + stability layer.
+ * --------------------------------------------------------------------------- */
+
+/* Universal box-sizing so padding/border never widens an element past its
+   declared size — the foundation for predictable responsive layout. */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* Guard against horizontal scrollbar at any viewport. The page-level
+   gradient + sidebar can otherwise overflow by a pixel or two and
+   trigger a permanent x-scroll. */
+html, body, .stApp {
+  overflow-x: hidden !important;
+}
+
+/* Anchor the main content so it has a minimum height even before
+   widgets have finished hydrating — reduces layout shift on first paint. */
+section[data-testid="stMain"] [data-testid="stMainBlockContainer"] {
+  min-height: 100vh;
+}
+
+/* Tablet (≤ 1024px): mid-range sidebar width. */
+@media (max-width: 1024px) {
+  [data-testid="stSidebar"] {
+    width: clamp(180px, 22vw, 240px) !important;
+    min-width: clamp(180px, 22vw, 240px) !important;
+  }
+}
+
+/* Mobile (≤ 768px): stack main-page columns vertically, hide vertical
+   separators (only meaningful in a horizontal layout), tighten sidebar. */
+@media (max-width: 768px) {
+  [data-testid="stSidebar"] {
+    width: clamp(160px, 25vw, 220px) !important;
+    min-width: clamp(160px, 25vw, 220px) !important;
+  }
+  section[data-testid="stMain"] [data-testid="stHorizontalBlock"] {
+    flex-direction: column !important;
+    gap: 0.5rem !important;
+  }
+  section[data-testid="stMain"] [data-testid="stColumn"] {
+    width: 100% !important;
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
+  }
+  /* Vertical separator only makes sense in a side-by-side row. */
+  section[data-testid="stMain"] .prism-vsep {
+    display: none !important;
+  }
+}
+
+/* Phone (≤ 480px): tightest sidebar + smaller theme toggle. */
+@media (max-width: 480px) {
+  [data-testid="stSidebar"] {
+    width: 160px !important;
+    min-width: 160px !important;
+  }
+  [data-testid="stSidebar"] [data-testid="stButton"] button {
+    width: 40px !important;
+    height: 40px !important;
+    padding: 8px !important;
+    font-size: 18px !important;
+  }
+  /* Glass panels get tighter padding so they don't dominate the
+     narrow sidebar viewport. */
+  section[data-testid="stSidebar"] .st-key-prism_description_block,
+  section[data-testid="stSidebar"] .st-key-prism_fees_block {
+    padding: 0.5rem 0.6rem !important;
+    margin: 0.4rem 0.15rem !important;
+  }
+}
+
+/* Disable layout-shifting animations for users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

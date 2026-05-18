@@ -1,0 +1,602 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
+  .hero {
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at 50% 85%,
+                  var(--bg-stop-1) 0%,
+                  var(--bg-stop-2) 65%,
+                  var(--bg-stop-3) 100%);
+    transition: background 0.35s ease;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* Glass title card — frosted panel over the canvas with the PRISM title
+     and its expanded-form subtitle. backdrop-filter blurs whatever the
+     trails are painting beneath. */
+  .glass-card {
+    position: fixed;
+    /* Shifted 6% left of viewport center so the PRISM card + the post-prism
+       wave region (which opens out from its right edge) sit on the left half
+       of the banner; histogram stays on the far right. */
+    left: 44%; top: 50%;
+    transform: translate(-50%, -50%);
+    padding: 14px 38px 16px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 14px;
+    box-shadow: 0 8px 28px var(--glass-shadow);
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+    transition: background 0.35s ease, border-color 0.35s ease,
+                box-shadow 0.35s ease;
+  }
+  .glass-title {
+    font-family: Arial, sans-serif;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    color: var(--fg);
+    line-height: 1;
+  }
+  .glass-sub {
+    font-family: Arial, sans-serif;
+    font-weight: 400;
+    letter-spacing: 0.30em;
+    color: var(--glass-sub-fg);
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="hero"><canvas id="hero"></canvas></div>
+<div class="glass-card">
+  <div class="glass-title" id="glass-title">PRISM</div>
+  <div class="glass-sub"   id="glass-sub">Probability Risk Inference Simulation Method</div>
+</div>
+<!--PRISM_CONFIG_INJECT-->
+<script>
+(function () {
+  // ---- Config & theme resolution -----------------------------------------
+  const CFG = window.PRISM_CONFIG;
+  const MODE = CFG.mode;                       // "light" | "dark" | "system"
+  const THEMES = CFG.themes;                   // { light: {...}, dark: {...} }
+  const SIM = CFG.sim;                         // animation constants
+  const mql = window.matchMedia('(prefers-color-scheme: dark)');
+
+  function resolved() {
+    if (MODE === 'light') return 'light';
+    if (MODE === 'dark') return 'dark';
+    return mql.matches ? 'dark' : 'light';
+  }
+
+  // Push the resolved palette to CSS variables on <html>. The page's CSS
+  // background gradient and the glass card both read from these.
+  function pushVarsToRoot() {
+    const r = resolved();
+    const t = THEMES[r];
+    const root = document.documentElement;
+    root.setAttribute('data-resolved', r);
+    root.style.setProperty('--bg-stop-1',    t.bg_stop_1);
+    root.style.setProperty('--bg-stop-2',    t.bg_stop_2);
+    root.style.setProperty('--bg-stop-3',    t.bg_stop_3);
+    root.style.setProperty('--fg',           t.fg);
+    root.style.setProperty('--glass-bg',     t.glass_bg);
+    root.style.setProperty('--glass-border', t.glass_border);
+    root.style.setProperty('--glass-shadow', t.glass_shadow);
+    root.style.setProperty('--glass-sub-fg', t.glass_sub_fg);
+  }
+
+  // Active palette + pre-built strings consumed by the canvas. Rebuilt only
+  // when theme or layout changes — never per frame.
+  let theme = null;
+  let cache = null;   // pre-built color strings keyed off theme + layout
+
+  function rebuildTheme() {
+    const t = THEMES[resolved()];
+    theme = {
+      fg:        t.canvas_fg,
+      halo:      t.canvas_halo,
+      dim:       t.canvas_dim,
+      highlight: t.canvas_highlight,
+      blend:     t.canvas_blend,
+    };
+  }
+
+  // ---- Canvas + layout ---------------------------------------------------
+  const canvas = document.getElementById('hero');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const HAS_ROUND_RECT = typeof ctx.roundRect === 'function';
+
+  const titleEl = document.getElementById('glass-title');
+  const subEl   = document.getElementById('glass-sub');
+  const cardEl  = document.querySelector('.glass-card');
+
+  let W = 0, H = 0, CX = 0, CY = 0, ORIGIN_X = 0, RIGHT_EDGE = 0;
+  let TITLE_FONT_SIZE = 0, DISPERSE_AT = 0;
+  // Vertical band the prism card occupies — waves and histogram are
+  // confined to this strip so nothing renders outside the prism's height.
+  let BAND_TOP = 0, BAND_HEIGHT = 1;
+  let WAVE_AMP_MAX_RT = 0;   // amp_max actually used at runtime (clamped to band)
+
+  function resize() {
+    const node = canvas.parentNode;
+    W = node.clientWidth; H = node.clientHeight;
+    canvas.width = Math.max(1, Math.round(W * dpr));
+    canvas.height = Math.max(1, Math.round(H * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    CX = W * 0.5; CY = H * 0.5;
+    ORIGIN_X = Math.max(24, W * 0.02);
+    RIGHT_EDGE = W * (1 - SIM.hist_frac) - 6;
+    // Title is 10% smaller than the previous canvas-rendered version
+    // (was min(W*0.10, H*0.55) → now min(W*0.09, H*0.495)).
+    TITLE_FONT_SIZE = Math.min(W * 0.09, H * 0.495);
+    titleEl.style.fontSize = TITLE_FONT_SIZE + 'px';
+    subEl.style.fontSize   = Math.max(9, Math.min(15, TITLE_FONT_SIZE * 0.135)) + 'px';
+    // Capture the glass card's bounds in canvas coordinates.
+    const cardRect = cardEl.getBoundingClientRect();
+    const heroRect = canvas.parentNode.getBoundingClientRect();
+    DISPERSE_AT = cardRect.right  - heroRect.left;
+    BAND_TOP    = cardRect.top    - heroRect.top;
+    BAND_HEIGHT = Math.max(1, cardRect.height);
+    // Clamp wave amplitude so a walker can never leave the card's y-band.
+    WAVE_AMP_MAX_RT = Math.max(SIM.wave_amp_min,
+                               Math.min(SIM.wave_amp_max,
+                                        (BAND_HEIGHT / 2) * SIM.wave_band_frac));
+    // Re-clamp already-spawned walkers' amplitudes to the new band. Scale
+    // proportionally rather than re-roll so a window resize doesn't make
+    // mid-flight walkers visually jump to a new amplitude.
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+      if (state[i] === STATE_ALIVE && ampA[i] > WAVE_AMP_MAX_RT) {
+        ampA[i] = WAVE_AMP_MAX_RT;
+      }
+    }
+    // Speed is derived from lifetime so the walker always takes exactly
+    // LIFETIME_S seconds to cross from ORIGIN_X to RIGHT_EDGE, regardless
+    // of viewport width.
+    SPEED_X = Math.max(1, (RIGHT_EDGE - ORIGIN_X) / LIFETIME_S);
+    rebuildCache();
+  }
+
+  function rebuildCache() {
+    if (!theme || W <= 0 || H <= 0) return;
+    cache = {
+      // Alive walkers in flight — bold "black" (light theme) / white (dark).
+      aliveStroke:    `rgba(${theme.fg}, 0.85)`,
+      aliveShadow:    `rgba(${theme.fg}, 0.55)`,
+      // Terminated walkers whose bin is NOT the current max — muted grey.
+      // Pre-built rgba() strings so the per-walker draw loop never concats.
+      dimStroke:      `rgba(${theme.dim}, 0.70)`,
+      dimShadow:      `rgba(${theme.dim}, 0.40)`,
+      // Terminated walkers whose bin IS the current max — blue accent.
+      accentStroke:   `rgba(${theme.highlight}, 0.92)`,
+      accentShadow:   `rgba(${theme.highlight}, 0.65)`,
+      axisStroke:     `rgba(${theme.fg}, 0.35)`,
+      // Glassy histogram bars: semi-transparent fill + soft shadow.
+      barFill:        `rgba(${theme.fg}, 0.55)`,
+      barShadow:      `rgba(${theme.fg}, 0.30)`,
+      hotBarFill:     `rgba(${theme.highlight}, 0.78)`,
+      hotBarShadow:   `rgba(${theme.highlight}, 0.55)`,
+    };
+  }
+
+  function applyResolved() {
+    pushVarsToRoot();
+    rebuildTheme();
+    rebuildCache();
+  }
+
+  // ---- Simulation --------------------------------------------------------
+  const LIFETIME_S      = SIM.lifetime_s;
+  const MAX_PARTICLES   = Math.max(1, SIM.max_particles);
+  const TRAIL_SUBSAMPLE = SIM.trail_subsample;
+  const NUM_BINS        = SIM.num_bins;
+  const HIST_DECAY      = SIM.hist_decay;
+  const TRAIL_CAP       = SIM.trail_cap;
+  const WAVE_AMP_MIN     = SIM.wave_amp_min;
+  const WAVE_AMP_SPAN    = SIM.wave_amp_max - SIM.wave_amp_min;
+  const WAVE_FREQ_MIN    = SIM.wave_freq_min;
+  const WAVE_FREQ_SPAN   = SIM.wave_freq_max - SIM.wave_freq_min;
+  const WAVE_FADE_PX     = SIM.wave_fade_px;
+  // Amplitude factor the wave fades down to in the last WAVE_FADE_PX before
+  // RIGHT_EDGE — not to zero, so walkers still scatter into the histogram,
+  // but each trail tightens up cleanly instead of looking like a loose loop.
+  const WAVE_TAPER_FLOOR = SIM.wave_taper_floor != null ? SIM.wave_taper_floor : 0.3;
+  const WAVE_TAPER_RANGE = 1 - WAVE_TAPER_FLOOR;
+
+  let SPEED_X = 100;  // recomputed each resize from LIFETIME_S
+
+  const TARGET_ALIVE  = Math.max(1, SIM.target_alive);
+  const TERM_FADE_S   = SIM.term_fade_s;
+  // Spawn cadence: one walker every (LIFETIME / TARGET_ALIVE), so the live
+  // population is steady and the walkers are evenly offset in their cycle.
+  const SPAWN_INTERVAL_MS = (LIFETIME_S * 1000) / TARGET_ALIVE;
+
+  // TRAIL_SUBSAMPLE must be a power of two so the per-tick `& MASK` test
+  // works in place of a modulo. Fall back to 1 otherwise.
+  const TRAIL_SUB_MASK =
+    (TRAIL_SUBSAMPLE & (TRAIL_SUBSAMPLE - 1)) === 0 ? TRAIL_SUBSAMPLE - 1 : 0;
+
+  // Lifecycle states for each slot.
+  const STATE_FREE = 0, STATE_ALIVE = 1, STATE_TERM = 2;
+
+  // Typed-array simulation state. Everything is pre-allocated once; the
+  // animation loop never allocates after this point. Trails are circular
+  // buffers indexed into shared flat Float32Arrays — no per-frame [x,y]
+  // sub-arrays, no .push/.shift, no .splice.
+  const px        = new Float32Array(MAX_PARTICLES);
+  const py        = new Float32Array(MAX_PARTICLES);
+  const ptick     = new Int32Array(MAX_PARTICLES);
+  const state     = new Uint8Array(MAX_PARTICLES);   // STATE_*
+  const termBin   = new Int8Array(MAX_PARTICLES);    // bin the walker landed in
+  const termAge   = new Float32Array(MAX_PARTICLES); // seconds since termination
+  const curBin    = new Int8Array(MAX_PARTICLES);    // bin of current y; -1 if pre-prism
+  const trailX    = new Float32Array(MAX_PARTICLES * TRAIL_CAP);
+  const trailY    = new Float32Array(MAX_PARTICLES * TRAIL_CAP);
+  const trailLen  = new Int32Array(MAX_PARTICLES);   // points stored, ≤ TRAIL_CAP
+  const trailHead = new Int32Array(MAX_PARTICLES);   // index of next write slot
+  // Per-walker wave parameters — re-randomized on spawn.
+  const ampA      = new Float32Array(MAX_PARTICLES);
+  const freqA     = new Float32Array(MAX_PARTICLES);
+  const signA     = new Int8Array(MAX_PARTICLES);    // +1 / -1 mirror flag
+  const useCosA   = new Uint8Array(MAX_PARTICLES);   // 0 = sin, 1 = cos
+  const histCounts = new Float32Array(NUM_BINS);
+
+  let aliveCount = 0;
+  let nextFreeHint = 0;
+  // Seed the accumulator so the first walker spawns on frame 1; subsequent
+  // walkers spawn every SPAWN_INTERVAL_MS as long as aliveCount < TARGET_ALIVE.
+  let spawnAccumulator = SPAWN_INTERVAL_MS;
+
+  function spawn() {
+    if (aliveCount >= TARGET_ALIVE) return;
+    for (let n = 0; n < MAX_PARTICLES; n++) {
+      const i = (nextFreeHint + n) % MAX_PARTICLES;
+      if (state[i] !== STATE_FREE) continue;
+      state[i]    = STATE_ALIVE;
+      px[i]       = ORIGIN_X;
+      py[i]       = CY;
+      ptick[i]    = 0;
+      curBin[i]   = -1;
+      termAge[i]  = 0;
+      const base = i * TRAIL_CAP;
+      trailX[base] = ORIGIN_X;
+      trailY[base] = CY;
+      trailLen[i]  = 1;
+      trailHead[i] = 1;
+      // Randomize this slot's wave parameters so each new walker draws a
+      // distinct curve as it progresses past the prism. Amplitude is
+      // bounded at runtime so the walker can't leave the prism's y-band.
+      const ampSpan = Math.max(0, WAVE_AMP_MAX_RT - WAVE_AMP_MIN);
+      ampA[i]    = WAVE_AMP_MIN  + Math.random() * ampSpan;
+      freqA[i]   = WAVE_FREQ_MIN + Math.random() * WAVE_FREQ_SPAN;
+      signA[i]   = Math.random() < 0.5 ? 1 : -1;
+      useCosA[i] = Math.random() < 0.5 ? 0 : 1;
+      nextFreeHint = (i + 1) % MAX_PARTICLES;
+      aliveCount++;
+      return;
+    }
+  }
+
+  // Walker reached the right edge — record into the histogram, freeze
+  // its trail, and let it linger (colored grey or blue depending on
+  // whether its bin is the current max) until termAge exceeds TERM_FADE_S.
+  function terminate(i, bin) {
+    state[i]   = STATE_TERM;
+    termBin[i] = bin;
+    termAge[i] = 0;
+    histCounts[bin] += 1;
+    aliveCount--;
+  }
+
+  function freeSlot(i) {
+    state[i]    = STATE_FREE;
+    trailLen[i] = 0;
+    trailHead[i] = 0;
+    curBin[i]   = -1;
+  }
+
+  // ---- Draw passes (trails → histogram) ---------------------------------
+  // Walkers terminate naturally at RIGHT_EDGE and feed the histogram on
+  // cull. drawTrails reads `curBin[i]` (populated in the advance loop)
+  // instead of recomputing the bin per walker per pass.
+  //
+  // mode constants for strokeWalker — small ints branch-predict better
+  // than string compares inside the inner loop.
+  const STROKE_FULL = 0, STROKE_PRE = 1, STROKE_POST = 2;
+
+  function strokeWalker(i, mode) {
+    const l = trailLen[i];
+    if (l < 2) return;
+    const base = i * TRAIL_CAP;
+    let idx = (trailHead[i] - l + TRAIL_CAP) % TRAIL_CAP;
+    let started = false;
+    for (let j = 0; j < l; j++) {
+      const x = trailX[base + idx];
+      const y = trailY[base + idx];
+      const include = mode === STROKE_FULL
+        || (mode === STROKE_PRE  && x <= DISPERSE_AT)
+        || (mode === STROKE_POST && x >  DISPERSE_AT);
+      if (include) {
+        if (started) ctx.lineTo(x, y);
+        else { ctx.moveTo(x, y); started = true; }
+      }
+      idx = (idx + 1) % TRAIL_CAP;
+    }
+  }
+
+  function drawTrails(maxBin, hasMax) {
+    if (!cache) return;
+
+    ctx.save();
+    ctx.globalCompositeOperation = theme.blend;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    // Pass 1: ALIVE walkers — bold foreground stroke with a soft glow that
+    // gives the line a glassy halo. Batched into one beginPath/stroke since
+    // all alive walkers share strokeStyle / shadowColor / shadowBlur.
+    ctx.shadowColor = cache.aliveShadow;
+    ctx.shadowBlur  = 3;
+    ctx.strokeStyle = cache.aliveStroke;
+    ctx.lineWidth   = 0.9;
+    ctx.beginPath();
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+      if (state[i] !== STATE_ALIVE) continue;
+      strokeWalker(i, STROKE_FULL);
+    }
+    ctx.stroke();
+
+    // Pass 2 & 3: TERMINATED walkers — drawn one at a time so each can
+    // age out via its own globalAlpha. Colored grey if its landing bin is
+    // NOT the current max, blue if it IS. Each gets a matching halo.
+    ctx.lineWidth = 1.1;
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+      if (state[i] !== STATE_TERM) continue;
+      const isMax = hasMax && termBin[i] === maxBin;
+      const fade  = Math.max(0, 1 - termAge[i] / TERM_FADE_S);
+      ctx.globalAlpha = fade;
+      if (isMax) {
+        ctx.strokeStyle = cache.accentStroke;
+        ctx.shadowColor = cache.accentShadow;
+        ctx.shadowBlur  = 6;
+      } else {
+        ctx.strokeStyle = cache.dimStroke;
+        ctx.shadowColor = cache.dimShadow;
+        ctx.shadowBlur  = 3;
+      }
+      ctx.beginPath();
+      strokeWalker(i, STROKE_FULL);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur  = 0;  // reset for downstream draws
+
+    ctx.restore();
+  }
+
+  // Draw one histogram bar — rounded corners when the browser supports
+  // ctx.roundRect, falling back to a plain fillRect otherwise.
+  function fillGlassBar(x, y, w, h, radius) {
+    if (HAS_ROUND_RECT) {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, radius);
+      ctx.fill();
+    } else {
+      ctx.fillRect(x, y, w, h);
+    }
+  }
+
+  function drawHistogram(maxBin) {
+    if (!cache) return;
+    const axisX = W * (1 - SIM.hist_frac);
+    ctx.save();
+    ctx.strokeStyle = cache.axisStroke;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(axisX, BAND_TOP);
+    ctx.lineTo(axisX, BAND_TOP + BAND_HEIGHT);
+    ctx.stroke();
+
+    const maxCount = histCounts[maxBin];
+    // Bail before any walker has reached the right edge — otherwise the
+    // hot-bar pass below would always paint at bin 0 (the default maxBin
+    // when all counts are zero).
+    if (maxCount < 0.5) { ctx.restore(); return; }
+
+    const binH    = BAND_HEIGHT / NUM_BINS;
+    const histX0  = axisX + 2;
+    const histMaxW = W * SIM.hist_frac * 0.85;
+    const barH    = Math.max(0.6, binH * 0.78);
+    const radius  = Math.min(3, barH * 0.4);
+    ctx.globalCompositeOperation = theme.blend;
+
+    // Pass A: every bar except the tallest — glassy translucent fill
+    // with a soft drop shadow tied to the bar color.
+    ctx.fillStyle   = cache.barFill;
+    ctx.shadowColor = cache.barShadow;
+    ctx.shadowBlur  = 5;
+    for (let i = 0; i < NUM_BINS; i++) {
+      if (i === maxBin) continue;
+      const w = (histCounts[i] / maxCount) * histMaxW;
+      if (w > 0.1) fillGlassBar(histX0, BAND_TOP + i * binH + 0.5, w, barH, radius);
+    }
+    // Pass B: tallest bar — accent fill with a stronger glow.
+    ctx.fillStyle   = cache.hotBarFill;
+    ctx.shadowColor = cache.hotBarShadow;
+    ctx.shadowBlur  = 9;
+    fillGlassBar(histX0, BAND_TOP + maxBin * binH + 0.5, histMaxW, barH, radius);
+    ctx.shadowBlur  = 0;
+    ctx.restore();
+  }
+
+  // ---- Main loop ---------------------------------------------------------
+  let lastTime = performance.now();
+  let rafId = 0;
+
+  function frame(nowMs) {
+    const dt = Math.min(0.05, (nowMs - lastTime) / 1000);
+    lastTime = nowMs;
+
+    // Spawn at most one walker every SPAWN_INTERVAL_MS, capped by TARGET_ALIVE.
+    spawnAccumulator += dt * 1000;
+    while (spawnAccumulator >= SPAWN_INTERVAL_MS) {
+      if (aliveCount < TARGET_ALIVE) spawn();
+      spawnAccumulator -= SPAWN_INTERVAL_MS;
+    }
+    // Tab returns from a long background — drop accumulated catch-up so we
+    // don't burst-spawn a flood of walkers all at once.
+    if (spawnAccumulator > SPAWN_INTERVAL_MS * 4) spawnAccumulator = 0;
+
+    // Advance walkers and age out terminated ones.
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+      const s = state[i];
+      if (s === STATE_FREE) continue;
+
+      if (s === STATE_TERM) {
+        termAge[i] += dt;
+        if (termAge[i] >= TERM_FADE_S) freeSlot(i);
+        continue;
+      }
+
+      // STATE_ALIVE — physics.
+      let x = px[i] + SPEED_X * dt;
+      let y = CY;
+      let bin = -1;
+      if (x > DISPERSE_AT) {
+        const progress = x - DISPERSE_AT;
+        const fadeIn  = progress < WAVE_FADE_PX ? progress / WAVE_FADE_PX : 1;
+        const distEnd = RIGHT_EDGE - x;
+        const fadeOut = distEnd < WAVE_FADE_PX
+          ? WAVE_TAPER_FLOOR + WAVE_TAPER_RANGE * (distEnd / WAVE_FADE_PX)
+          : 1;
+        const angle = freqA[i] * progress;
+        const wave  = useCosA[i] ? Math.cos(angle) : Math.sin(angle);
+        const dispBase = signA[i] * ampA[i] * wave;
+        // Visual y uses BOTH fades (smooth in at prism, smooth out at edge)
+        // so the trail doesn't cut off mid-oscillation.
+        y = CY + dispBase * fadeIn * fadeOut;
+        // Binning y uses ONLY the entry fade — so the histogram reflects
+        // the wave's natural spread instead of collapsing to the centerline
+        // where the edge taper drives every walker.
+        const yBin = CY + dispBase * fadeIn;
+        const yc = (yBin - BAND_TOP) / BAND_HEIGHT;
+        bin = (yc * NUM_BINS) | 0;
+        if (bin < 0) bin = 0;
+        else if (bin >= NUM_BINS) bin = NUM_BINS - 1;
+      }
+      px[i] = x;
+      py[i] = y;
+      curBin[i] = bin;
+      const tickNew = ptick[i] + 1;
+      ptick[i] = tickNew;
+
+      if ((tickNew & TRAIL_SUB_MASK) === 0) {
+        const base = i * TRAIL_CAP;
+        const h = trailHead[i];
+        trailX[base + h] = x;
+        trailY[base + h] = y;
+        const hNext = h + 1;
+        trailHead[i] = hNext === TRAIL_CAP ? 0 : hNext;
+        const lNext = trailLen[i] + 1;
+        if (lNext <= TRAIL_CAP) trailLen[i] = lNext;
+      }
+
+      if (x > RIGHT_EDGE) {
+        // Histogram only updates here — when a walker actually reaches the
+        // right edge. The bin assigned in the post-prism branch above
+        // already uses the un-tapered y so it spans the full y-band.
+        if (bin < 0) bin = (NUM_BINS / 2) | 0;  // fallback, should never trip
+        terminate(i, bin);
+      } else if (y < BAND_TOP - 80 || y > BAND_TOP + BAND_HEIGHT + 80) {
+        freeSlot(i);
+        aliveCount--;
+      }
+    }
+
+    // Decay, with denormal cutoff so values don't slow arithmetic over hours.
+    const decay = Math.pow(HIST_DECAY, dt * 60);
+    for (let i = 0; i < NUM_BINS; i++) {
+      const v = histCounts[i] * decay;
+      histCounts[i] = v < 1e-6 ? 0 : v;
+    }
+
+    // Locate the tallest histogram bin once per frame; both drawTrails and
+    // drawHistogram use it (trails to pick which terminated walkers turn
+    // blue; histogram to tint the tallest bar).
+    let maxBin = 0, maxCount = histCounts[0];
+    for (let i = 1; i < NUM_BINS; i++) {
+      if (histCounts[i] > maxCount) { maxCount = histCounts[i]; maxBin = i; }
+    }
+    const hasMax = maxCount >= 0.5;
+
+    // Draw order: trails → histogram. Title is an HTML overlay (glass card)
+    // sitting above the canvas.
+    ctx.clearRect(0, 0, W, H);
+    drawTrails(maxBin, hasMax);
+    drawHistogram(maxBin);
+
+    rafId = requestAnimationFrame(frame);
+  }
+
+  // ---- Lifecycle: register, cleanup --------------------------------------
+  // Only wire the OS-theme-change listener when the user actually chose
+  // 'system' mode; otherwise it's dead code that just adds a leak path.
+  let onMqlChange = null;
+  if (MODE === 'system') {
+    onMqlChange = function () { applyResolved(); };
+    if (mql.addEventListener) mql.addEventListener('change', onMqlChange);
+    else if (mql.addListener) mql.addListener(onMqlChange);
+  }
+
+  // Re-sync layout whenever the card's actual rendered box changes — e.g.
+  // when web-fonts finish loading, when the user resizes the window, or
+  // when Streamlit re-renders the iframe at a different width.
+  let resizeObs = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObs = new ResizeObserver(resize);
+    resizeObs.observe(cardEl);
+  }
+  window.addEventListener('resize', resize);
+
+  // Idempotent cleanup, bound to multiple lifecycle hooks because
+  // Streamlit may swap the iframe without firing `pagehide` reliably.
+  let cleanedUp = false;
+  function cleanup() {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    window.removeEventListener('resize', resize);
+    window.removeEventListener('pagehide', cleanup);
+    window.removeEventListener('beforeunload', cleanup);
+    if (resizeObs) { resizeObs.disconnect(); resizeObs = null; }
+    if (onMqlChange) {
+      if (mql.removeEventListener) mql.removeEventListener('change', onMqlChange);
+      else if (mql.removeListener) mql.removeListener(onMqlChange);
+      onMqlChange = null;
+    }
+  }
+  window.addEventListener('pagehide',     cleanup);
+  window.addEventListener('beforeunload', cleanup);
+
+  // ---- Kick off ----------------------------------------------------------
+  // Defer the first layout pass into rAF so the glass card's webfont +
+  // backdrop-filter have settled — otherwise `cardEl.getBoundingClientRect()`
+  // can return a pre-layout size and DISPERSE_AT/BAND_TOP latch wrong.
+  applyResolved();
+  requestAnimationFrame(() => {
+    resize();
+    lastTime = performance.now();
+    rafId = requestAnimationFrame(frame);
+  });
+})();
+</script>
+</body>
+</html>
