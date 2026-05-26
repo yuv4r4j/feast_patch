@@ -19,7 +19,8 @@ You are reviewing PySpark / Spark SQL as a senior data engineer with deep produc
 This skill is one node in a SAS-to-pyspark migration pipeline:
 
 1. **User uploads SAS code.**
-2. **sas-analyzer** scans the code, classifies its data sources (datawarehouse / datalake / flat files like CSV, Excel, SAS datasets / metadata-bound libraries), and explains what the program does.
+2. **sas-analyzer** scans the code, classifies its data sources, and explains the program.
+2b. **metadata-ingester** (if a metadata folder was supplied) reads CSV/PDF metadata files and emits a fact/dim catalog + source-to-target mapping + naming standards. You consult this bundle to grade the conversion's compliance with the target dimensional model.
 3. **sas-to-pyspark-converter** converts the SAS to target code, using the analyzer's data source inventory as context.
 4. **pyspark-data-engineer** reviews the converted code and emits structured findings **plus an overall confidence score (0-100)**.
 5. If confidence is below the stop threshold (≥ 85 with no blockers), the converter takes the findings as additional requirements and re-emits the code. Loop back to step 4.
@@ -94,15 +95,18 @@ If the user wants a *rewrite*, do the review first, then offer to rewrite. The r
 
 ## Review dimensions (in order)
 
-1. **Correctness vs source.** If migrated from SAS: missings, BY-group ordering, MERGE overlay semantics, macro resolution, date arithmetic, format handling — does the PySpark version preserve them?
-2. **Idiomatic PySpark.** DataFrame API vs `spark.sql` choice. `F.col` consistency. Lazy chains vs imperative steps. Use of `Window`, `pivot`, `rollup`/`cube`, `stack`/`unpivot` where appropriate.
-3. **Plan and shuffle.** Wide vs narrow transformations. Shuffle count and size. Partition strategy. See `references/catalyst-and-aqe.md` for the AQE-aware checklist.
-4. **Performance.** Broadcast joins (manual vs AQE). Skew handling. Repartition / coalesce choices. Persist / cache discipline. See `references/performance-checklist.md`.
-5. **Resource and cost.** Driver memory pressure (`.collect()`, `.toPandas()`). Executor sizing for the workload. Excessive recomputation. Excessive materialization.
-6. **Schema and types.** Type correctness vs source. Schema enforcement (`spark.read.schema(...)` vs `inferSchema`). NULL semantics.
-7. **I/O.** File format (Parquet, Delta, Iceberg, ORC, CSV). Partitioning on write. Compaction. Small-file proliferation.
-8. **Anti-patterns.** `collect()` misuse, UDF when built-in exists, row-by-row processing, `count()` for existence checks, etc. See `references/anti-patterns.md`.
-9. **Operability.** Idempotency. Error handling. Logging. Configuration vs hard-coding.
+1. **Workflow match against SAS source.** Does the PySpark output's logical structure mirror the SAS program's? Same number of intermediate steps, same DataFrame names tracking the SAS dataset names, same branching. If the SAS has five DATA steps producing five datasets, the PySpark has five DataFrames with matching names. Structure mismatches are 🟠 Important.
+2. **Dimensional model — facts and dimensions with LEFT JOIN.** Legacy lake / warehouse reads are replaced by the new ERD's fact and dimension tables (per the metadata-ingester bundle, or inferred with `fact_*` / `dim_*` defaults). Facts join to dimensions via **LEFT JOIN** on surrogate keys. Direct references to legacy tables that should have been mapped — 🔴 Blocker.
+3. **Naming.** Catalog / schema / table / column names follow the metadata's standards (or the conservative defaults). If the metadata says no `_model` suffix on schemas, confirm.
+4. **Correctness vs source.** If migrated from SAS: missings, BY-group ordering, MERGE overlay semantics, macro resolution, date arithmetic, format handling — does the PySpark version preserve them?
+5. **Idiomatic PySpark.** DataFrame API vs `spark.sql` choice. `F.col` consistency. Lazy chains vs imperative steps. Use of `Window`, `pivot`, `rollup`/`cube`, `stack`/`unpivot` where appropriate.
+6. **Plan and shuffle.** Wide vs narrow transformations. Shuffle count and size. Partition strategy. See `references/catalyst-and-aqe.md` for the AQE-aware checklist.
+7. **Performance.** Broadcast joins (manual vs AQE). Skew handling. Repartition / coalesce choices. Persist / cache discipline. See `references/performance-checklist.md`.
+8. **Resource and cost.** Driver memory pressure (`.collect()`, `.toPandas()`). Executor sizing for the workload. Excessive recomputation. Excessive materialization.
+9. **Schema and types.** Type correctness vs source. Schema enforcement (`spark.read.schema(...)` vs `inferSchema`). NULL semantics.
+10. **I/O.** File format (Parquet, Delta, Iceberg, ORC, CSV). Partitioning on write. Compaction. Small-file proliferation.
+11. **Anti-patterns.** `collect()` misuse, UDF when built-in exists, row-by-row processing, `count()` for existence checks, etc. See `references/anti-patterns.md`.
+12. **Operability.** Idempotency. Error handling. Logging. Configuration vs hard-coding.
 
 ## Output format
 
@@ -126,6 +130,14 @@ If the user wants a *rewrite*, do the review first, then offer to rewrite. The r
 
 ## 🟢 Notes
 - [N1] ...
+
+## Workflow alignment with SAS source
+<one to three lines: does the PySpark output's structure mirror the SAS program's logical steps, branches, and DataFrame names?>
+
+## Dimensional model compliance
+- Facts: <list fact tables read>
+- Dimensions: <list dim tables; flag any INNER JOIN instead of LEFT JOIN to dims>
+- Naming: <does the output follow the metadata's standards (or the inferred defaults)?>
 
 ## Recommended next actions (prioritized)
 1. <highest-leverage fix>

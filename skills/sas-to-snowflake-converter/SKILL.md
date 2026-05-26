@@ -56,15 +56,26 @@ You **may** do safe static work:
 
 When the user wants to validate the converted code, recommend they run it themselves in their own environment — and offer to help interpret any errors, logs, or unexpected results they bring back. The skill is the consultant; the user is the operator.
 
-## Hard rule — no stored procedures
+## Hard rule — no stored procedures, no tasks; only tables, views, dynamic tables
 
-Do **not** emit Snowflake stored procedures. Specifically, your output must never contain:
+Do **not** emit Snowflake stored procedures or tasks. Your output must never contain:
 
-- `CREATE PROCEDURE` / `CREATE OR REPLACE PROCEDURE`
+- `CREATE PROCEDURE` / `CREATE OR REPLACE PROCEDURE` (in any language: SQL, JavaScript, Java, Python, Scala)
 - `CALL` statements that invoke a procedure you're defining as part of the conversion
 - Snowflake Scripting / SQL stored-procedure blocks (`DECLARE`, `BEGIN`, `END`, `LET`, `RETURN`, etc. when used to define a procedure)
 - JavaScript or Java stored procedures
 - Python stored procedures registered via `CREATE PROCEDURE ... LANGUAGE PYTHON`
+- **`CREATE TASK` / `CREATE OR REPLACE TASK`** — including scheduled, child, and DAG-style tasks
+- **`EXECUTE TASK`** statements
+- **Task graphs** (`AFTER` clauses between tasks)
+
+**Allowed Snowflake object types:**
+
+- `TABLE` (regular, transient, temporary) — for materialized outputs.
+- `VIEW` — for non-materialized projections.
+- `DYNAMIC TABLE` — for declarative incremental materializations with a `TARGET_LAG`. Prefer these over tasks when you need refresh semantics.
+
+Functions (`CREATE FUNCTION`) for tiny inline expressions are acceptable but uncommon — use sparingly and only when the alternative is a copy-pasted CASE expression in many places.
 
 This rule applies to the Snowflake SQL output **and** the Snowpark Python output. The Snowpark output should not call `session.sproc.register(...)` or `Session.add_packages(...)` for the purpose of creating a stored procedure either.
 
@@ -78,6 +89,58 @@ This rule applies to the Snowflake SQL output **and** the Snowpark Python output
 **Why this rule.** Stored procedures hide the SAS-to-Snowflake mapping inside an opaque object, make code review harder, mix declarative SQL with imperative logic, and break the auditability that the rest of this pipeline depends on (analyzer → converter → reviewer hand-off relies on diff-able source).
 
 **If a review (`snowflake-architect`) recommends adding a stored procedure**, do not comply. Surface the disagreement in the Notes section: "Reviewer suggested wrapping this in a `CREATE PROCEDURE` block; the converter's standing rule is no stored procedures — kept the logic as a Python function instead. If the deployment actually requires a stored procedure, that wrapping should be done outside this conversion pipeline."
+
+## Hard rule — replace legacy DW/lake schemas with a facts + dimensions ERD
+
+The SAS source likely reads from legacy warehouse / lake tables that follow whatever historical model the data team had. The Snowflake output **must** map those reads to a new dimensional ERD: **fact tables and dimension tables, joined with LEFT JOIN**.
+
+**Sourcing the model.** The fact catalog, dimension catalog, and source-to-target mapping come from the `metadata-ingester` skill's bundle. Consume it. If no metadata bundle was provided:
+
+1. Surface in Notes that you're inferring the dimensional model rather than reading it from authoritative metadata.
+2. Apply conservative defaults — typical patterns are `fact_<event>` for facts and `dim_<entity>` for dimensions, with surrogate keys named `<entity>_sk` and business keys named `<entity>_bk` or `<entity>_id`.
+3. Recommend strongly that the user supplies a metadata folder for the next pass.
+
+**Naming convention** (from the metadata; defaults when missing):
+
+- **Database:** `cstone_biz` (unless the metadata says otherwise).
+- **Schema:** the domain name **without** any `_model` suffix. If the metadata refers to `<domain>_model`, drop `_model`. Use `<domain>` for both fact and dimension schemas unless the standards split them.
+- **Fact tables:** prefix `fact_` (e.g., `cstone_biz.sales.fact_orders`).
+- **Dimension tables:** prefix `dim_` (e.g., `cstone_biz.sales.dim_customer`).
+- **Surrogate keys:** suffix `_sk`.
+- **Business / natural keys:** suffix `_bk` or `_id`.
+
+**Join pattern.** Facts join to dimensions via **LEFT JOIN** on the surrogate key:
+
+```sql
+SELECT
+    f.order_sk,
+    f.sales_amount,
+    c.customer_name,
+    p.product_name,
+    d.year_month
+FROM cstone_biz.sales.fact_orders f
+LEFT JOIN cstone_biz.sales.dim_customer c ON f.customer_sk = c.customer_sk
+LEFT JOIN cstone_biz.sales.dim_product  p ON f.product_sk  = p.product_sk
+LEFT JOIN cstone_biz.sales.dim_date     d ON f.order_date_sk = d.date_sk
+```
+
+LEFT JOIN (not INNER) is the dimensional-model default — a missing dim row shouldn't drop a fact row; it should appear with NULL attributes (or a sentinel "Unknown" dim if the metadata specifies one).
+
+**What this means in practice.**
+
+- A SAS DATA step that reads `legacy.orders` and `legacy.customers` and INNER JOINs them becomes a query against `cstone_biz.<domain>.fact_orders` LEFT JOINed to `cstone_biz.<domain>.dim_customer` via surrogate keys.
+- Aggregations at a coarser grain than the fact's grain become CTEs that group the fact, then join dims.
+- Reports that join multiple legacy tables consolidate to one fact + many dims via LEFT JOINs.
+
+If a SAS construct doesn't map naturally to a dimensional shape (e.g., a one-off operational table that isn't catalogued as fact or dim), surface it in Notes — don't force it into the dimensional model if it doesn't belong there.
+
+## Hard rule — preserve the SAS workflow
+
+The converted code's execution order and dataset boundaries must mirror the SAS source. If the SAS program has five logical steps producing five intermediate datasets, the Snowflake output has five CTEs / tables / dynamic tables named accordingly. If the SAS has a process flow with parallel branches, preserve the branching in the Snowflake output.
+
+**Why.** The reviewer's first dimension is "workflow match" — if the converted code reshapes the program's logical structure, the review will return a low confidence score and request you reshape it. Get it right the first time.
+
+**How.** When the analyzer surfaced a step-by-step walkthrough, those are your output stages. Each becomes a named CTE in the SQL, or a named DataFrame in Snowpark, or a `DYNAMIC TABLE` if the workflow expects periodic refresh.
 
 ## The conversion algorithm
 
@@ -101,7 +164,7 @@ For each SAS program:
 
 You may be invoked in two modes:
 
-**Mode A — first pass.** The user supplies SAS source (and ideally the analyzer's data source inventory). Produce the Snowflake translation and emit it.
+**Mode A — first pass.** The user supplies SAS source plus the analyzer's data source inventory plus (if available) the metadata-ingester's metadata bundle (fact / dim catalogs, source-to-target mapping, naming standards). Produce the Snowflake translation, mapping legacy reads to the new dimensional model, and emit it.
 
 **Mode B — iteration after review.** The user supplies the SAS source, the previous Snowflake output, and the `snowflake-architect` review (findings + confidence score). Treat the review as additional requirements and produce a revised translation.
 
@@ -148,10 +211,13 @@ When invoked outside the app (interactive chat), the same three sections are fin
 ## Style guide for the SQL output
 
 - **Uppercase table and column names** by default (Snowflake's default identifier behavior). If the SAS code uses mixed case meaningfully, preserve and double-quote.
+- **Database name: `cstone_biz`** unless the metadata bundle specifies otherwise. Schemas: domain name with no `_model` suffix.
+- **Fact tables `fact_*`, dimension tables `dim_*`, surrogate keys `*_sk`, business keys `*_bk`** unless the metadata bundle specifies different conventions.
 - **One CTE per SAS logical step** — name CTEs after the SAS dataset names so the user can audit the translation.
 - **Prefer `QUALIFY`** for "filter on a window function" patterns instead of subqueries. It's the idiomatic Snowflake way.
 - **Prefer `MERGE`** for upserts (SAS `UPDATE` or `MODIFY`). For SAS `MERGE BY` (overlay semantics), use `FULL OUTER JOIN` with `COALESCE`.
 - **Materialize with `CREATE OR REPLACE TABLE ... AS`** at the points where the SAS program writes a dataset. Use `CREATE OR REPLACE TEMPORARY TABLE` for `WORK.` libraries.
+- **Use `CREATE OR REPLACE DYNAMIC TABLE ... TARGET_LAG = '<lag>' WAREHOUSE = <wh> AS ...`** when the SAS program is intended to refresh periodically (e.g., the analyzer noted the program runs on a schedule and produces a curated output). Dynamic tables replace task graphs as the declarative way to keep a table fresh.
 - **Don't pre-optimize.** Don't add `CLUSTER BY` or warehouse hints in the translation — that's the architect's job. Focus on correctness and idiomatic structure.
 
 ## Style guide for the Snowpark output

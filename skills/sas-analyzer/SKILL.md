@@ -26,7 +26,8 @@ If the user's intent shifts from "explain" to "convert," say so and hand off; do
 This skill is one node in a SAS-to-target migration pipeline:
 
 1. **User uploads SAS code.**
-2. **sas-analyzer** scans the code, classifies its data sources (datawarehouse / datalake / flat files like CSV, Excel, SAS datasets / metadata-bound libraries), and explains what the program does.
+2. **sas-analyzer** scans the code, classifies its data sources, and explains the program.
+2b. **metadata-ingester** (parallel to step 2) reads CSV/PDF metadata files if the user supplied a metadata folder. Its output complements your data-source inventory.
 3. **sas-to-snowflake-converter** *or* **sas-to-pyspark-converter** converts the SAS to target code, using the analyzer's data source inventory as context.
 4. **snowflake-architect** *or* **pyspark-data-engineer** reviews the converted code and emits structured findings **plus an overall confidence score (0-100)**.
 5. If confidence is below the stop threshold (≥ 85 with no blockers), the converter takes the findings as additional requirements and re-emits the code. Loop back to step 4.

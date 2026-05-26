@@ -56,6 +56,37 @@ You **may** do safe static work:
 
 When the user wants to validate the converted code, recommend they run it themselves in their own environment — and offer to help interpret any errors, logs, or unexpected results they bring back. The skill is the consultant; the user is the operator.
 
+## Hard rule — preserve the SAS workflow and use a dimensional model
+
+The PySpark output must mirror the SAS program's logical structure (same number of steps, same dataset boundaries, same branching). Each SAS step maps to a named PySpark DataFrame variable; the variable names should track the SAS dataset names.
+
+If the `metadata-ingester` skill produced a metadata bundle, consume it. It contains:
+
+- **Fact catalog** — fact-table names, grains, measures, dim-FK lists.
+- **Dimension catalog** — dim-table names, business / surrogate keys, attributes, SCD type.
+- **Source-to-target mapping** — which legacy lake/warehouse tables become which facts and dimensions.
+- **Naming standards** — table and column naming conventions for the new model.
+
+Use the catalog to replace legacy lake / warehouse reads with reads from the new fact and dimension tables. Facts join to dimensions via **LEFT JOIN** on surrogate keys:
+
+```python
+fact     = spark.table("<catalog>.<schema>.fact_orders")
+dim_cust = spark.table("<catalog>.<schema>.dim_customer")
+dim_prod = spark.table("<catalog>.<schema>.dim_product")
+
+result = (
+    fact.alias("f")
+        .join(dim_cust.alias("c"), F.col("f.customer_sk") == F.col("c.customer_sk"), "left")
+        .join(dim_prod.alias("p"), F.col("f.product_sk")  == F.col("p.product_sk"),  "left")
+)
+```
+
+If no metadata bundle is supplied, infer the dimensional shape with conservative defaults (`fact_<event>`, `dim_<entity>`, `*_sk` surrogate keys) and surface the inference in Notes — strongly recommend the user supply metadata for the next pass.
+
+**Catalog and schema names.** For PySpark, the catalog/schema convention is environment-dependent (Unity Catalog on Databricks, Iceberg catalog on Spark, Hive metastore on classic Hadoop). Read the metadata's naming standards if present; otherwise leave the catalog/schema as a parameter (`<catalog>.<schema>`) for the user to fill in.
+
+**No tasks / stored procs analog in PySpark.** Spark doesn't have stored procedures, so the analogous rule is: do not wrap transformations in SQL UDFs or Spark stored procedures (Spark Connect has limited SP support; avoid). Use Python functions returning DataFrames; orchestrate in Python.
+
 ## Target environment assumptions (PySpark 3.4.1)
 
 The translation targets Spark 3.4.1 features:
@@ -81,7 +112,7 @@ The translation targets Spark 3.4.1 features:
 
 You may be invoked in two modes:
 
-**Mode A — first pass.** The user supplies SAS source (and ideally the analyzer's data source inventory). Produce the PySpark translation and emit it.
+**Mode A — first pass.** The user supplies SAS source plus the analyzer's data source inventory plus (if available) the metadata-ingester's metadata bundle (fact / dim catalogs, source-to-target mapping). Produce the PySpark translation, mapping legacy reads to the new dimensional model, and emit it.
 
 **Mode B — iteration after review.** The user supplies the SAS source, the previous PySpark output, and the `pyspark-data-engineer` review (findings + confidence score). Treat the review as additional requirements and produce a revised translation.
 

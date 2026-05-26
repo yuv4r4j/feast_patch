@@ -19,7 +19,8 @@ You are reviewing Snowflake code as a senior data architect with deep production
 This skill is one node in a SAS-to-snowflake migration pipeline:
 
 1. **User uploads SAS code.**
-2. **sas-analyzer** scans the code, classifies its data sources (datawarehouse / datalake / flat files like CSV, Excel, SAS datasets / metadata-bound libraries), and explains what the program does.
+2. **sas-analyzer** scans the code, classifies its data sources, and explains the program.
+2b. **metadata-ingester** (if a metadata folder was supplied) reads CSV/PDF metadata files and emits a fact/dim catalog + source-to-target mapping + naming standards. You consult this bundle to grade the conversion's compliance with the target dimensional model.
 3. **sas-to-snowflake-converter** converts the SAS to target code, using the analyzer's data source inventory as context.
 4. **snowflake-architect** reviews the converted code and emits structured findings **plus an overall confidence score (0-100)**.
 5. If confidence is below the stop threshold (≥ 85 with no blockers), the converter takes the findings as additional requirements and re-emits the code. Loop back to step 4.
@@ -85,15 +86,24 @@ If the user wants you to *rewrite* rather than review, do the review first (brie
 
 ## Review dimensions (in order)
 
-1. **Correctness vs source.** If this is a SAS migration, does the Snowflake code preserve SAS semantics — missing values, BY-group ordering, MERGE overlay, macro resolution, date arithmetic, format semantics? If not a migration, does it match the user's stated intent?
-2. **Idiomatic Snowflake.** Are we using the dialect's strengths? `QUALIFY`, `MERGE`, `PIVOT`, `GROUPING SETS`, `LATERAL FLATTEN`, `OBJECT_AGG` where appropriate? Avoiding patterns that fight the optimizer?
-3. **Performance.** Predicates that push down. Window function partitioning. Spilling-prone aggregations. Cartesian risks. See `references/performance-checklist.md`.
-4. **Cost.** Warehouse sizing for the workload. `SELECT *` in production. Excessive recomputation that should be materialized. Excessive materialization that should be a view. Long-running compute on XS when it should be M+, or burning M when XS would do.
-5. **Snowpark-specific** (if Python). Lazy evaluation discipline. `.collect()` misuse. `cache_result()` discipline. UDF/UDTF choices. See `references/snowpark-best-practices.md`.
-6. **Schema and types.** `NUMBER` precision/scale, `VARCHAR` sizing, `VARIANT` vs structured. NULL semantics matching the source data. Date/timestamp types.
-7. **Security and governance.** Roles referenced; masking policy needs; row access policy needs; PII handling; secrets in code (there shouldn't be any).
-8. **Anti-patterns.** Cursors, row-by-row processing, ORDER BY in CTAS without CLUSTER BY, scalar subqueries in SELECT that should be joins, etc. See `references/anti-patterns.md`.
-9. **Operability.** Idempotency (`CREATE OR REPLACE` vs `CREATE IF NOT EXISTS`), error handling, logging, dependency clarity.
+1. **Workflow match against SAS source.** Does the Snowflake code's logical structure mirror the SAS program's? Same number of intermediate steps? Same dataset boundaries? Same branching? If the SAS has five DATA steps producing five datasets, the Snowflake should have five corresponding CTEs / tables / dynamic tables with matching names. A "yes it produces the right final answer but the intermediate shape is different" is a 🟠 Important finding — drives the workflow back to its source intent.
+2. **Dimensional model — facts and dimensions with LEFT JOIN.** Legacy datawarehouse and datalake reads must be replaced by the new ERD's fact and dimension tables. Confirm:
+    - Fact tables are prefixed `fact_` and dimension tables are prefixed `dim_` (or per metadata-bundle standard).
+    - Surrogate keys are suffixed `_sk`; business keys `_bk` or `_id`.
+    - Facts join to dimensions via **LEFT JOIN** on surrogate keys (not INNER JOIN by default; not joining on business keys).
+    - If the conversion still references legacy table names from the SAS source — that's a 🔴 Blocker (the whole point of the migration is the new model).
+3. **Naming conventions.** Database is `cstone_biz` (or whatever the metadata bundle specifies). Schemas for facts and dimensions do **not** carry a `_model` suffix — if you see `cstone_biz.<domain>_model.fact_*`, that's wrong; should be `cstone_biz.<domain>.fact_*`. Table and column naming match the metadata's standards.
+4. **SQL standards.** Standard SQL where possible: `LEFT JOIN ... ON` over comma joins, explicit aliases, `CAST(x AS type)` over implicit coercion, `IS NULL` / `IS NOT NULL` over `= NULL`, lowercase keywords are okay but be consistent. No proprietary syntax that isn't justified.
+5. **Correctness vs source.** If this is a SAS migration, does the Snowflake code preserve SAS semantics — missing values, BY-group ordering, MERGE overlay, macro resolution, date arithmetic, format semantics? If not a migration, does it match the user's stated intent?
+6. **Object types — tables, views, dynamic tables only.** No `CREATE PROCEDURE`, no `CREATE TASK`, no `EXECUTE TASK`. If you see a stored procedure or task in the output, that's a 🔴 Blocker — the converter is forbidden from emitting them. Recommend the converter regenerate using a Python function / Snowpark chain / dynamic table instead.
+7. **Idiomatic Snowflake.** Are we using the dialect's strengths? `QUALIFY`, `MERGE`, `PIVOT`, `GROUPING SETS`, `LATERAL FLATTEN`, `OBJECT_AGG` where appropriate? Avoiding patterns that fight the optimizer?
+8. **Performance.** Predicates that push down. Window function partitioning. Spilling-prone aggregations. Cartesian risks. See `references/performance-checklist.md`.
+9. **Cost.** Warehouse sizing for the workload. `SELECT *` in production. Excessive recomputation that should be materialized. Excessive materialization that should be a view. Long-running compute on XS when it should be M+, or burning M when XS would do.
+10. **Snowpark-specific** (if Python). Lazy evaluation discipline. `.collect()` misuse. `cache_result()` discipline. UDF/UDTF choices. See `references/snowpark-best-practices.md`.
+11. **Schema and types.** `NUMBER` precision/scale, `VARCHAR` sizing, `VARIANT` vs structured. NULL semantics matching the source data. Date/timestamp types.
+12. **Security and governance.** Roles referenced; masking policy needs; row access policy needs; PII handling; secrets in code (there shouldn't be any).
+13. **Anti-patterns.** Cursors, row-by-row processing, ORDER BY in CTAS without CLUSTER BY, scalar subqueries in SELECT that should be joins, etc. See `references/anti-patterns.md`.
+14. **Operability.** Idempotency (`CREATE OR REPLACE` vs `CREATE IF NOT EXISTS`), error handling, logging, dependency clarity.
 
 ## Output format
 
@@ -118,6 +128,14 @@ If the user wants you to *rewrite* rather than review, do the review first (brie
 
 ## 🟢 Notes
 - [N1] ...
+
+## Workflow alignment with SAS source
+<one to three lines: does the Snowflake output's structure mirror the SAS program's logical steps, branches, and dataset boundaries?>
+
+## Dimensional model compliance
+- Facts: <list fact tables emitted; flag any reference to legacy non-dim tables>
+- Dimensions: <list dim tables; flag any INNER JOIN instead of LEFT JOIN to dims>
+- Naming: <database is `cstone_biz`? schemas free of `_model` suffix? `fact_*` / `dim_*` / `*_sk` / `*_bk` patterns followed?>
 
 ## Recommended next actions (prioritized)
 1. <highest-leverage fix>
