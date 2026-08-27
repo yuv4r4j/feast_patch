@@ -1,0 +1,201 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: repo-data-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: streamlit-git-sync-pod
+spec:
+  restartPolicy: Never
+  activeDeadlineSeconds: 600
+  volumes:
+    - name: repo-data
+      persistentVolumeClaim:
+        claimName: repo-data-pvc
+  initContainers:
+    - name: git-sync-repo1
+      image: registry.k8s.io/git-sync/git-sync:v4.2.1
+      env:
+        - name: GITSYNC_REPO
+          value: "https://github.com/org/repo1.git"
+        - name: GITSYNC_ROOT
+          value: "/repos/repo1"
+        - name: GITSYNC_LINK
+          value: "current"
+        - name: GITSYNC_ONE_TIME
+          value: "true"
+        - name: GITSYNC_DEPTH
+          value: "1"
+      volumeMounts:
+        - name: repo-data
+          mountPath: /repos
+    - name: git-sync-repo2
+      image: registry.k8s.io/git-sync/git-sync:v4.2.1
+      env:
+        - name: GITSYNC_REPO
+          value: "https://github.com/org/repo2.git"
+        - name: GITSYNC_ROOT
+          value: "/repos/repo2"
+        - name: GITSYNC_LINK
+          value: "current"
+        - name: GITSYNC_ONE_TIME
+          value: "true"
+        - name: GITSYNC_DEPTH
+          value: "1"
+      volumeMounts:
+        - name: repo-data
+          mountPath: /repos
+    - name: git-sync-repo3
+      image: registry.k8s.io/git-sync/git-sync:v4.2.1
+      env:
+        - name: GITSYNC_REPO
+          value: "https://github.com/org/repo3.git"
+        - name: GITSYNC_ROOT
+          value: "/repos/repo3"
+        - name: GITSYNC_LINK
+          value: "current"
+        - name: GITSYNC_ONE_TIME
+          value: "true"
+        - name: GITSYNC_DEPTH
+          value: "1"
+      volumeMounts:
+        - name: repo-data
+          mountPath: /repos
+    - name: git-sync-repo4
+      image: registry.k8s.io/git-sync/git-sync:v4.2.1
+      env:
+        - name: GITSYNC_REPO
+          value: "https://github.com/org/repo4.git"
+        - name: GITSYNC_ROOT
+          value: "/repos/repo4"
+        - name: GITSYNC_LINK
+          value: "current"
+        - name: GITSYNC_ONE_TIME
+          value: "true"
+        - name: GITSYNC_DEPTH
+          value: "1"
+      volumeMounts:
+        - name: repo-data
+          mountPath: /repos
+    - name: git-sync-repo5
+      image: registry.k8s.io/git-sync/git-sync:v4.2.1
+      env:
+        - name: GITSYNC_REPO
+          value: "https://github.com/org/repo5.git"
+        - name: GITSYNC_ROOT
+          value: "/repos/repo5"
+        - name: GITSYNC_LINK
+          value: "current"
+        - name: GITSYNC_ONE_TIME
+          value: "true"
+        - name: GITSYNC_DEPTH
+          value: "1"
+      volumeMounts:
+        - name: repo-data
+          mountPath: /repos
+    - name: git-sync-repo6
+      image: registry.k8s.io/git-sync/git-sync:v4.2.1
+      env:
+        - name: GITSYNC_REPO
+          value: "https://github.com/org/repo6.git"
+        - name: GITSYNC_ROOT
+          value: "/repos/repo6"
+        - name: GITSYNC_LINK
+          value: "current"
+        - name: GITSYNC_ONE_TIME
+          value: "true"
+        - name: GITSYNC_DEPTH
+          value: "1"
+      volumeMounts:
+        - name: repo-data
+          mountPath: /repos
+    - name: git-sync-repo7
+      image: registry.k8s.io/git-sync/git-sync:v4.2.1
+      env:
+        - name: GITSYNC_REPO
+          value: "https://github.com/org/repo7.git"
+        - name: GITSYNC_ROOT
+          value: "/repos/repo7"
+        - name: GITSYNC_LINK
+          value: "current"
+        - name: GITSYNC_ONE_TIME
+          value: "true"
+        - name: GITSYNC_DEPTH
+          value: "1"
+      volumeMounts:
+        - name: repo-data
+          mountPath: /repos
+    - name: git-sync-repo8
+      image: registry.k8s.io/git-sync/git-sync:v4.2.1
+      env:
+        - name: GITSYNC_REPO
+          value: "https://github.com/org/repo8.git"
+        - name: GITSYNC_ROOT
+          value: "/repos/repo8"
+        - name: GITSYNC_LINK
+          value: "current"
+        - name: GITSYNC_ONE_TIME
+          value: "true"
+        - name: GITSYNC_DEPTH
+          value: "1"
+      volumeMounts:
+        - name: repo-data
+          mountPath: /repos
+    - name: git-sync-repo9
+      image: registry.k8s.io/git-sync/git-sync:v4.2.1
+      env:
+        - name: GITSYNC_REPO
+          value: "https://github.com/org/repo9.git"
+        - name: GITSYNC_ROOT
+          value: "/repos/repo9"
+        - name: GITSYNC_LINK
+          value: "current"
+        - name: GITSYNC_ONE_TIME
+          value: "true"
+        - name: GITSYNC_DEPTH
+          value: "1"
+      volumeMounts:
+        - name: repo-data
+          mountPath: /repos
+    - name: git-sync-repo10
+      image: registry.k8s.io/git-sync/git-sync:v4.2.1
+      env:
+        - name: GITSYNC_REPO
+          value: "https://github.com/org/repo10.git"
+        - name: GITSYNC_ROOT
+          value: "/repos/repo10"
+        - name: GITSYNC_LINK
+          value: "current"
+        - name: GITSYNC_ONE_TIME
+          value: "true"
+        - name: GITSYNC_DEPTH
+          value: "1"
+      volumeMounts:
+        - name: repo-data
+          mountPath: /repos
+  containers:
+    - name: streamlit
+      image: python:3.11-slim
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          pip install streamlit &&
+          mkdir -p /app &&
+          for i in $(seq 1 10); do
+            cp -r /repos/repo${i}/current /app/repo${i}
+          done &&
+          cd /app/repo1 &&
+          streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+      ports:
+        - containerPort: 8501
+      volumeMounts:
+        - name: repo-data
+          mountPath: /repos
